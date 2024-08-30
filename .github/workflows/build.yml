@@ -1,0 +1,55 @@
+on:
+  push:
+    tags:
+      - 'v*'
+      # - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+name: Build and release
+
+jobs:
+  build_pi:
+    name: Raspberry Pi Build (bullseye)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rust
+        run: rustup update stable && rustup default stable
+      - name: Install cross
+        run: cargo install cross
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: cross build --release --target armv7-unknown-linux-gnueabihf
+      - name: Store the binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: arm-build
+          path: ./target/armv7-unknown-linux-gnueabihf/release/ekg
+  publish-release:
+    needs: build_pi
+    name: Publish Github Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the binary
+        uses: actions/download-artifact@v3
+        with:
+          name: arm-build
+          path: ./
+      - name: List files
+        run: |
+          ls -l .
+      - name: Build archive
+        shell: bash
+        run: |
+          tar -czf ekg-rpi.tar.gz ekg
+      - name: Release
+        uses: ncipollo/release-action@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          artifacts: "ekg"
+          # bodyFile: "body.md"
+            
+
+        
