@@ -27,6 +27,8 @@ pub struct Frame {
 }
 
 fn draw_frame(frame: Frame, origin: nalgebra::Vector2<f32>, size: nalgebra::Vector2<f32>) {
+    draw_rectangle(origin.x, origin.y, size.x, size.y, Color::from_hex(0xeeeeee));
+
     draw_rectangle(0.0, origin.y + size.y / 2.0, size.x, 2.0, BLACK);
     draw_rectangle(0.0, origin.y, size.x, 2.0, BLACK);
     draw_rectangle(0.0, origin.y + size.y, size.x, 2.0, BLACK);
@@ -86,11 +88,14 @@ async fn main() {
                 Ok(frame) => frame,
                 Err(e) => {
                     println!("Error: {:?}", e);
+                    frame_arc2.lock().unwrap().take();
                     continue;
                 }
             };
 
             frame_arc2.lock().unwrap().replace(frame);
+
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
     });
 
@@ -112,10 +117,20 @@ async fn main() {
                     }
                 }
                 draw_text(format!("Satellites: {}", frame.fix).as_str(), 10.0, 60.0, 30.0, BLACK);
-                draw_frame(frame.clone(), Vector2::new(0.0, 100.0), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
+
+                match frame.metadata.has_gps_fix {
+                    true => {
+                        draw_text("GPS Lock", 10.0, 80.0, 30.0, GREEN);
+                    }
+                    false => {
+                        draw_text("No GPS", 10.0, 80.0, 30.0, RED);
+                    }
+                }
+
+                draw_frame(frame.clone(), Vector2::new(0.0, macroquad::window::screen_height() * 0.22), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
             }
             None => {
-                draw_text("No frame received", 10.0, 100.0, 30.0, BLACK);
+                draw_text("No data", 10.0, 100.0, 100.0, RED);
             }
         }
 
