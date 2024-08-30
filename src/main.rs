@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use clap::Parser;
 use nalgebra::ComplexField;
 use macroquad::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,11 @@ fn draw_frame(frame: Frame, origin: nalgebra::Vector2<f32>, size: nalgebra::Vect
     
     let mut last_pos = Vector2::new(0.0, 0.0);
 
+    let line_color = match frame.metadata.is_clipping {
+        true => RED,
+        false => BLUE,
+    };
+
     for i in 0..1800 {
         let x = i as f32 / parts_per_pixel;
         let val = frame.data[i] as f32 / 1024.0;
@@ -51,7 +57,7 @@ fn draw_frame(frame: Frame, origin: nalgebra::Vector2<f32>, size: nalgebra::Vect
             x + origin.x,
             val * size.y + origin.y,
             2.0,
-            BLUE,
+            line_color,
         );
 
         last_pos = Vector2::new(x + origin.x, val * size.y + origin.y);
@@ -62,12 +68,21 @@ fn draw_frame(frame: Frame, origin: nalgebra::Vector2<f32>, size: nalgebra::Vect
     draw_text("0", origin.x + size.x - 30.0, origin.y + size.y / 2.0 - 10.0, 25.0, BLACK);
     draw_text("-1", origin.x + size.x - 30.0, origin.y + size.y - 10.0, 25.0, BLACK);
 
+    if frame.metadata.is_clipping {
+        draw_text("Clipping", origin.x + 10.0, origin.y + 10.0, 25.0, RED);
+    }
 
+}
+
+#[derive(Parser)]
+struct Cli {
+    pub host: Option<String>
 }
 
 #[macroquad::main("BasicShapes")]
 async fn main() {
-
+    let args = Cli::parse();
+    let endpoint = args.host.unwrap_or("http://localhost:8767/frame".to_string());
     let window_size = Vector2::<f32>::new(800.0, 600.0);
 
     request_new_screen_size(window_size.x, window_size.y);
@@ -78,22 +93,22 @@ async fn main() {
     let frame_arc2 = frame_arc.clone();
     std::thread::spawn(move || {
         loop {
+            let endpoint = endpoint.clone();
             let frame = || -> anyhow::Result<Frame> { 
-                let response = reqwest::blocking::get("http://localhost:8080/frame")?;
+                let response = reqwest::blocking::get(endpoint)?;
                 let frame = response.json::<Frame>()?;
                 Ok(frame)
             }();
 
-            let frame = match frame {
-                Ok(frame) => frame,
+            match frame {
+                Ok(frame) => {
+                    frame_arc2.lock().unwrap().replace(frame);
+                },
                 Err(e) => {
                     println!("Error: {:?}", e);
                     frame_arc2.lock().unwrap().take();
-                    continue;
                 }
             };
-
-            frame_arc2.lock().unwrap().replace(frame);
 
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
@@ -108,6 +123,8 @@ async fn main() {
 
         match frame_arc.lock().unwrap().as_ref() {
             Some(frame) => {
+                draw_frame(frame.clone(), Vector2::new(0.0, macroquad::window::screen_height() * 0.22), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
+
                 match frame.timestamp {
                     Some(timestamp) => {
                         draw_text(format!("Timestamp: {}", timestamp).as_str(), 10.0, 40.0, 30.0, BLACK);
@@ -127,7 +144,6 @@ async fn main() {
                     }
                 }
 
-                draw_frame(frame.clone(), Vector2::new(0.0, macroquad::window::screen_height() * 0.22), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
             }
             None => {
                 draw_text("No data", 10.0, 100.0, 100.0, RED);
