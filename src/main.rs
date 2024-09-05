@@ -12,6 +12,13 @@ pub struct FrameMetadata {
     is_clipping: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FrameResponse {
+    frame: Option<Frame>,
+    node_id: String,
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct Frame {
@@ -87,16 +94,16 @@ async fn main() {
 
     request_new_screen_size(window_size.x, window_size.y);
 
-    let frame_arc: Arc<Mutex<Option<Frame>>> = Arc::new(Mutex::new(None));
+    let frame_arc: Arc<Mutex<Option<FrameResponse>>> = Arc::new(Mutex::new(None));
 
 
     let frame_arc2 = frame_arc.clone();
     std::thread::spawn(move || {
         loop {
             let endpoint = endpoint.clone();
-            let frame = || -> anyhow::Result<Frame> { 
+            let frame = || -> anyhow::Result<FrameResponse> { 
                 let response = reqwest::blocking::get(endpoint)?;
-                let frame = response.json::<Frame>()?;
+                let frame = response.json::<FrameResponse>()?;
                 Ok(frame)
             }();
 
@@ -122,26 +129,34 @@ async fn main() {
         draw_text("EKG for heartbeat-acquisition v2", 10.0, 20.0, 30.0, BLACK);
 
         match frame_arc.lock().unwrap().as_ref() {
-            Some(frame) => {
-                draw_frame(frame.clone(), Vector2::new(0.0, macroquad::window::screen_height() * 0.22), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
+            Some(frame_response) => {
 
-                match frame.timestamp {
-                    Some(timestamp) => {
-                        draw_text(format!("Timestamp: {}", timestamp).as_str(), 10.0, 40.0, 30.0, BLACK);
-                    }
-                    None => {
-                        draw_text("No timestamp", 10.0, 40.0, 30.0, BLACK);
-                    }
-                }
-                draw_text(format!("Satellites: {}", frame.fix).as_str(), 10.0, 60.0, 30.0, BLACK);
+                draw_text(format!("Node ID: {}", frame_response.node_id).as_str(), 10.0, 40.0, 30.0, BLACK);
 
-                match frame.metadata.has_gps_fix {
-                    true => {
-                        draw_text("GPS Lock", 10.0, 80.0, 30.0, GREEN);
+                if let Some(frame) = &frame_response.frame {
+
+                    draw_frame(frame.clone(), Vector2::new(0.0, macroquad::window::screen_height() * 0.22), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
+
+                    match frame.timestamp {
+                        Some(timestamp) => {
+                            draw_text(format!("Timestamp: {}", timestamp).as_str(), 10.0, 60.0, 30.0, BLACK);
+                        }
+                        None => {
+                            draw_text("No timestamp", 10.0, 40.0, 30.0, BLACK);
+                        }
                     }
-                    false => {
-                        draw_text("No GPS", 10.0, 80.0, 30.0, RED);
+                    draw_text(format!("Satellites: {}", frame.fix).as_str(), 10.0, 80.0, 30.0, BLACK);
+
+                    match frame.metadata.has_gps_fix {
+                        true => {
+                            draw_text("GPS Lock", 10.0, 100.0, 30.0, GREEN);
+                        }
+                        false => {
+                            draw_text("No GPS", 10.0, 100.0, 30.0, RED);
+                        }
                     }
+                } else {
+                    draw_text("No frame", 10.0, 100.0, 100.0, RED);
                 }
 
             }
