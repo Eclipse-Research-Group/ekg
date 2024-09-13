@@ -34,49 +34,69 @@ pub struct Frame {
     data: Vec<i16>,
 }
 
-fn draw_frame(frame: Frame, origin: nalgebra::Vector2<f32>, size: nalgebra::Vector2<f32>) {
+pub struct Series {
+    label: String,
+    data: Vec<f32>,
+    color: Color,
+    sample_rate: f32,
+}
+
+fn gen_sine(sample_rate: f32, freq: f32, duration: f32) -> Vec<f32> {
+    let mut data = Vec::new();
+    for i in 0..(duration * sample_rate) as usize {
+        data.push((2.0 * std::f32::consts::PI * freq * (i as f32) / sample_rate).sin());
+    }
+    data
+}
+
+// Set sample rate
+const SAMPLE_RATE: f32 = 20000.0;
+
+fn draw_frame(series: Vec<Series>, min_bound: Vector2<f32>, max_bound: Vector2<f32>, origin: nalgebra::Vector2<f32>, size: nalgebra::Vector2<f32>) {
     draw_rectangle(origin.x, origin.y, size.x, size.y, Color::from_hex(0xeeeeee));
 
     draw_rectangle(0.0, origin.y + size.y / 2.0, size.x, 2.0, BLACK);
     draw_rectangle(0.0, origin.y, size.x, 2.0, BLACK);
     draw_rectangle(0.0, origin.y + size.y, size.x, 2.0, BLACK);
 
-    let parts_per_pixel = 1800 as f32 / size.x;
-    
-    let mut last_pos = Vector2::new(0.0, 0.0);
+    for s in series.iter() {
+        let mut last_pos = Vector2::new(0.0, 0.0);
 
-    let line_color = match frame.metadata.is_clipping {
-        true => RED,
-        false => BLUE,
-    };
+        let parts_per_pixel = s.data.len() as f32 / size.x;
+        for i in 0..s.data.len() {
+            let x = i as f32 / parts_per_pixel;
+            let val = s.data[i];
 
-    for i in 0..1800 {
-        let x = i as f32 / parts_per_pixel;
-        let val = frame.data[i] as f32 / 1024.0;
+            if i == 0 {
+                last_pos = Vector2::new(origin.x + x, val * size.y + origin.y + size.y / 2.0);
+            }
 
-        if i == 0 {
-            last_pos = Vector2::new(origin.x + x, val * size.y + origin.y);
+            let new_pos = Vector2::new(x + origin.x, val * (size.y / 2.0) + origin.y + size.y / 2.0);
+
+            draw_line(
+                last_pos.x,
+                last_pos.y,
+                new_pos.x,
+                new_pos.y,
+                2.0,
+                s.color,
+            );
+
+            last_pos = new_pos;
+
         }
-
-        draw_line(
-            last_pos.x,
-            last_pos.y,
-            x + origin.x,
-            val * size.y + origin.y,
-            2.0,
-            line_color,
-        );
-
-        last_pos = Vector2::new(x + origin.x, val * size.y + origin.y);
-
     }
 
     draw_text("+1", origin.x + size.x - 30.0, origin.y - 10.0, 25.0, BLACK);
     draw_text("0", origin.x + size.x - 30.0, origin.y + size.y / 2.0 - 10.0, 25.0, BLACK);
     draw_text("-1", origin.x + size.x - 30.0, origin.y + size.y - 10.0, 25.0, BLACK);
 
-    if frame.metadata.is_clipping {
-        draw_text("Clipping", origin.x + 10.0, origin.y + 10.0, 25.0, RED);
+    for i in 0..series.len() {
+        let text_dims = draw_text(series[i].label.as_str(), origin.x + 10.0, origin.y + 25.0 + (i as f32 * 30.0), 25.0, series[i].color);
+
+        draw_rectangle(origin.x + 10.0, origin.y + 10.0 + (i as f32 * 30.0), text_dims.width + 10.0 + 25.0, text_dims.height + 10.0, WHITE);
+        draw_rectangle(origin.x + 10.0, origin.y + 10.0 + (i as f32 * 30.0), 10.0, 10.0, series[i].color);
+        draw_text(series[i].label.as_str(), origin.x + 10.0 + 25.0, origin.y + 25.0 + (i as f32 * 30.0), 25.0, series[i].color);
     }
 
 }
@@ -135,7 +155,27 @@ async fn main() {
 
                 if let Some(frame) = &frame_response.frame {
 
-                    draw_frame(frame.clone(), Vector2::new(0.0, macroquad::window::screen_height() * 0.22), Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
+                    let data_series = Series {
+                        label: "EKG".to_string(),
+                        data: frame.data[0..1800].iter().map(|x| ((*x as f32) - 512.0) / 512.0).collect(),
+                        color: BLUE,
+                        sample_rate: 20000.0
+                    };
+
+                    let sine = gen_sine(frame.sample_rate, 1.0e3, 3.0);
+
+                    let corr_series = Series {
+                        label: "Correlation".to_string(),
+                        data: sine,
+                        color: Color::from_rgba(255, 0, 0, 125),
+                        sample_rate: 20000.0
+                    };
+
+                    draw_frame(vec![corr_series, data_series],
+                        Vector2::new(0.0, -1.0),
+                        Vector2::new(300e-3, 1.0),
+                         Vector2::new(0.0, macroquad::window::screen_height() * 0.22),
+                          Vector2::new(macroquad::window::screen_width(), macroquad::window::screen_height() * 0.75));
 
                     match frame.timestamp {
                         Some(timestamp) => {
@@ -155,9 +195,15 @@ async fn main() {
                             draw_text("No GPS", 10.0, 100.0, 30.0, RED);
                         }
                     }
+
+                    if frame.metadata.is_clipping {
+                        draw_text("Clipping", 10.0, 10.0, 25.0, RED);
+                    }
                 } else {
                     draw_text("No frame", 10.0, 100.0, 100.0, RED);
                 }
+                
+
 
             }
             None => {
